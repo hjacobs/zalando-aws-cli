@@ -1,0 +1,3 @@
+clickclick>=0.6
+PyYAML
+stups-zign>=0.17
