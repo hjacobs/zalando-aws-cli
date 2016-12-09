@@ -7,15 +7,15 @@ import time
 import yaml
 import zign.api
 
-import mai
+import zalando_aws_cli
 
 from clickclick import Action, choice, error, AliasedGroup, info, print_table, OutputFormat
 from requests.exceptions import RequestException
 from zign.api import AuthenticationFailed
 
 AWS_CREDENTIALS_PATH = '~/.aws/credentials'
-CONFIG_DIR_PATH = click.get_app_dir('mai')
-CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, 'mai.yaml')
+CONFIG_DIR_PATH = click.get_app_dir('zalando-aws-cli')
+CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, 'zalando-aws-cli.yaml')
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
@@ -25,7 +25,7 @@ CREDENTIALS_RESOURCE = '/aws-accounts/{}/roles/{}/credentials'
 def print_version(ctx, param, value):
     if not value or ctx.resilient_parsing:
         return
-    click.echo('Mai {}'.format(mai.__version__))
+    click.echo('Zalando AWS CLI {}'.format(zalando_aws_cli.__version__))
     ctx.exit()
 
 
@@ -65,7 +65,7 @@ def cli(ctx, config_file, awsprofile):
             role = data['default_role']
 
         if not account:
-            raise click.UsageError('No default profile configured. Use "mai set-default..." to set a default profile.')
+            raise click.UsageError('No default profile configured. Use "zaws set-default..." to set a default profile.')
         ctx.invoke(login, account=account, role=role)
 
 

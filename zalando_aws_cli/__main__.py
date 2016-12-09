@@ -1,4 +1,4 @@
-from mai.cli import main
+from zalando_aws_cli.cli import main
 
 if __name__ == '__main__':
     main()
