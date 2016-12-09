@@ -20,7 +20,7 @@ CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, 'zalando-aws-cli.yaml')
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
 CREDENTIALS_RESOURCE = '/aws-accounts/{}/roles/{}/credentials'
-
+ROLES_RESOURCE = '/aws-account-roles/{}'
 
 def print_version(ctx, param, value):
     if not value or ctx.resilient_parsing:
@@ -106,18 +106,6 @@ def list_profiles(obj, output):
         print_table(sorted(role_list[0].keys()), role_list)
 
 
-def get_profiles(user):
-    '''Returns the AWS profiles for the specified user'''
-
-    # TODO MUST be changed to the Credential Service URL
-    service_url = 'https://teams.auth.zalando.com/api/accounts/aws?member={}&role=any'.format(user)
-
-    token = get_zign_token(user)
-    r = requests.get(service_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))})
-
-    return [ { 'name': item['name'], 'role': item['role'], 'id': item['id'] } for item in r.json() ]
-
-
 def get_zign_token(user, jwt=False):
     if jwt:
         try:
@@ -171,6 +159,16 @@ def get_aws_credentials(user, account, role, service_url):
     r = requests.get(credentials_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))})
 
     return r.json()
+
+def get_profiles(user, service_url):
+    '''Returns the AWS profiles for the specified user'''
+
+    roles_url = service_url + ROLES_RESOURCE.format(user)
+
+    token = get_zign_token(user)
+    r = requests.get(roles_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))})
+
+    return [ { 'name': item['name'], 'role': item['role'], 'id': item['id'] } for item in r.json() ]
 
 
 @cli.command()
