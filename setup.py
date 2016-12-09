@@ -14,7 +14,7 @@ from setuptools.command.test import test as TestCommand
 from setuptools import setup
 
 if sys.version_info < (3, 4, 0):
-    sys.stderr.write('FATAL: STUPS Mai needs to be run with Python 3.4+\n')
+    sys.stderr.write('FATAL: Zalando AWS CLI needs to be run with Python 3.4+\n')
     sys.exit(1)
 
 __location__ = os.path.join(os.getcwd(), os.path.dirname(inspect.getfile(inspect.currentframe())))
