@@ -173,7 +173,7 @@ def get_profiles(user, service_url):
     roles = r.json()['account_roles']
     print(roles)
 
-    return [ { 'name': item['name'], 'role': item['role'], 'id': item['account_id'] } for item in roles ]
+    return [ { 'name': item['account_name'], 'role': item['role_name'], 'id': item['account_id'] } for item in roles ]
 
 
 @cli.command()
