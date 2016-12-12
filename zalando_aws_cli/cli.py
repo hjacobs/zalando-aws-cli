@@ -9,7 +9,7 @@ import zign.api
 
 import zalando_aws_cli
 
-from clickclick import Action, choice, error, AliasedGroup, info, print_table, OutputFormat
+from clickclick import Action, AliasedGroup, print_table, OutputFormat
 from requests.exceptions import RequestException
 from zign.api import AuthenticationFailed
 
@@ -21,6 +21,7 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
 CREDENTIALS_RESOURCE = '/aws-accounts/{}/roles/{}/credentials'
 ROLES_RESOURCE = '/aws-account-roles/{}'
+
 
 def print_version(ctx, param, value):
     if not value or ctx.resilient_parsing:
@@ -100,7 +101,8 @@ def write_service_url(data, path):
 def list_profiles(obj, output):
     '''List profiles'''
 
-    role_list = get_profiles(obj['user'])
+    service_url = obj['config']['service_url']
+    role_list = get_profiles(obj['user'], service_url)
     role_list.sort(key=lambda r: r['name'])
     with OutputFormat(output):
         print_table(sorted(role_list[0].keys()), role_list)
@@ -129,7 +131,7 @@ def set_default(obj, account, role):
     role_list = get_profiles(obj['user'])
 
     if (account, role) not in [ (item['name'], item['role']) for item in role_list ]:
-        raise click.UsageError('Profile "{} {}" does not exist'.format(account, role))
+         raise click.UsageError('Profile "{} {}" does not exist'.format(account, role))
 
     obj['config']['default_account'] = account
     obj['config']['default_role'] = role
@@ -143,7 +145,7 @@ def set_default(obj, account, role):
 def get_aws_credentials(user, account, role, service_url):
     '''Requests AWS Temporary Credentials from the provided Credential Service URL'''
 
-    profiles = get_profiles(user)
+    profiles = get_profiles(user, service_url)
 
     id = None
     for item in profiles:
@@ -167,8 +169,11 @@ def get_profiles(user, service_url):
 
     token = get_zign_token(user)
     r = requests.get(roles_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))})
+    r.raise_for_status()
+    roles = r.json()['account_roles']
+    print(roles)
 
-    return [ { 'name': item['name'], 'role': item['role'], 'id': item['id'] } for item in r.json() ]
+    return [ { 'name': item['name'], 'role': item['role'], 'id': item['account_id'] } for item in roles ]
 
 
 @cli.command()
