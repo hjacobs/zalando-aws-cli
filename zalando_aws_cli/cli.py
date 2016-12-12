@@ -171,7 +171,6 @@ def get_profiles(user, service_url):
     r = requests.get(roles_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))})
     r.raise_for_status()
     roles = r.json()['account_roles']
-    print(roles)
 
     return [ { 'name': item['account_name'], 'role': item['role_name'], 'id': item['account_id'] } for item in roles ]
 
