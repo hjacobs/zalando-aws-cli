@@ -20,7 +20,7 @@ CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, 'zalando-aws-cli.yaml')
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
-CREDENTIALS_RESOURCE = '/aws-accounts/{}/roles/{}/credentials'
+CREDENTIALS_RESOURCE = '/aws-accounts/{account_id}/roles/{role_name}/credentials'
 ROLES_RESOURCE = '/aws-account-roles/{user_id}'
 
 MANAGED_ID_KEY = 'https://identity.zalando.com/managed-id'
@@ -50,13 +50,10 @@ def cli(ctx, config_file, awsprofile):
         with open(path, 'rb') as fd:
             data = yaml.safe_load(fd)
 
-    zign_config = stups_cli.config.load_config('zign')
-
     ctx.obj = {'config': data,
                'config-file': path,
                'config-dir': os.path.dirname(path),
-               'last-update-filename': os.path.join(os.path.dirname(path), 'last_update.yaml'),
-               'user': zign_config['user']}
+               'last-update-filename': os.path.join(os.path.dirname(path), 'last_update.yaml')}
 
     if 'service_url' not in data:
         write_service_url(data, path)
@@ -73,28 +70,29 @@ def cli(ctx, config_file, awsprofile):
 
 
 @cli.command()
-@click.argument('account')
-@click.argument('role')
+@click.argument('account-name')
+@click.argument('role-name')
 @click.option('-r', '--refresh', is_flag=True, help='Keep running and refresh access tokens automatically')
 @click.option('--awsprofile', help='Profilename in ~/.aws/credentials', default='default', show_default=True)
 @click.pass_obj
-def login(obj, account, role, refresh, awsprofile):
+def login(obj, account_name, role_name, refresh, awsprofile):
     '''Login to AWS with given account and role'''
 
     repeat = True
     while repeat:
         last_update = get_last_update(obj)
-        if 'account' in last_update and last_update['account'] and (not account or not role):
-            account, role = last_update['account'], last_update['role']
+        if 'account_name' in last_update and last_update['account_name'] and (not account_name or not role_name):
+            account_name, role_name = last_update['account_name'], last_update['role_name']
 
-        creds = get_aws_credentials(obj['user'], account, role, obj['config']['service_url'])
-        with Action('Writing temporary AWS credentials for {} {}..'.format(account, role)):
-            write_aws_credentials(awsprofile, creds['access_key_id'], creds['secret_access_key'], creds['session_token'])
+        credentials = get_aws_credentials(account_name, role_name, obj['config']['service_url'])
+        with Action('Writing temporary AWS credentials for {} {}..'.format(account_name, role_name)):
+            write_aws_credentials(awsprofile, credentials['access_key_id'], credentials['secret_access_key'],
+                                  credentials['session_token'])
             with open(obj['last-update-filename'], 'w') as fd:
-                yaml.safe_dump({'timestamp': time.time(), 'account': account, 'role': role}, fd)
+                yaml.safe_dump({'timestamp': time.time(), 'account_name': account_name, 'role_name': role_name}, fd)
 
         if refresh:
-            last_update = get_last_update(obj)
+            last_update = get_last_update(obj['last-update-filename'])
             wait_time = 3600 * 0.9
             with Action('Waiting {} minutes before refreshing credentials..'
                         .format(round(((last_update['timestamp']+wait_time)-time.time()) / 60))) as act:
@@ -110,11 +108,11 @@ def login(obj, account, role, refresh, awsprofile):
             repeat = False
 
 
-@cli.command('list')
+@cli.command()
 @output_option
 @click.pass_obj
-def list_profiles(obj, output):
-    '''List profiles'''
+def list(obj, output):
+    '''List AWS profiles'''
 
     service_url = obj['config']['service_url']
     role_list = get_profiles(service_url)
@@ -176,23 +174,25 @@ def get_ztoken():
         raise click.ClickException(e)
 
 
-def get_aws_credentials(user, account, role, service_url):
-    '''Requests AWS Temporary Credentials from the provided Credential Service URL'''
+def get_aws_credentials(account_name, role_name, service_url):
+    '''Requests the specified AWS Temporary Credentials from the provided Credential Service URL'''
 
-    profiles = get_profiles(user, service_url)
+    profiles = get_profiles(service_url)
 
-    id = None
+    account_id = None
     for item in profiles:
-        if item['name'] == account and item['role'] == role:
-            id = item['id']
+        if item['account_name'] == account_name and item['role_name'] == role_name:
+            account_id = item['account_id']
 
-    if not id:
-        raise click.UsageError('Profile "{} {}" does not exist'.format(account, role))
+    if not account_id:
+        raise click.UsageError('Profile "{} {}" does not exist'.format(account_name, role_name))
 
-    credentials_url = service_url + CREDENTIALS_RESOURCE.format(id, role)
+    credentials_url = service_url + CREDENTIALS_RESOURCE.format(account_id=account_id, role_name=role_name)
 
-    token = get_zign_token(user, jwt=True)
+    token = get_ztoken()
+
     r = requests.get(credentials_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))})
+    r.raise_for_status()
 
     return r.json()
 
@@ -215,6 +215,15 @@ def get_profiles(service_url):
     return r.json()['account_roles']
 
 
+def get_last_update(filename):
+    try:
+        with open(filename, 'rb') as fd:
+            last_update = yaml.safe_load(fd)
+    except:
+        last_update = {'timestamp': 0}
+    return last_update
+
+
 @cli.command()
 @click.argument('profile', nargs=-1)
 @click.option('--awsprofile', help='Profilename in ~/.aws/credentials', default='default', show_default=True)
@@ -226,15 +235,6 @@ def require(context, profile, awsprofile):
     time_remaining = last_update['timestamp'] + 3600 * 0.9 - time.time()
     if time_remaining < 0 or (profile and profile[0] != last_update['profile']):
         context.invoke(login, profile=profile, refresh=False, awsprofile=awsprofile)
-
-
-def get_last_update(obj):
-    try:
-        with open(obj['last-update-filename'], 'rb') as fd:
-            last_update = yaml.safe_load(fd)
-    except:
-        last_update = {'timestamp': 0}
-    return last_update
 
 
 def write_aws_credentials(profile, key_id, secret, session_token=None):
