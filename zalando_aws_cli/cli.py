@@ -1,5 +1,6 @@
 import click
 import configparser
+import jwt
 import os
 import requests
 import stups_cli.config
@@ -20,8 +21,9 @@ CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, 'zalando-aws-cli.yaml')
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
 CREDENTIALS_RESOURCE = '/aws-accounts/{}/roles/{}/credentials'
-ROLES_RESOURCE = '/aws-account-roles/{}'
+ROLES_RESOURCE = '/aws-account-roles/{user_id}'
 
+MANAGED_ID_KEY = 'https://identity.zalando.com/managed-id'
 
 def print_version(ctx, param, value):
     if not value or ctx.resilient_parsing:
@@ -115,8 +117,8 @@ def list_profiles(obj, output):
     '''List profiles'''
 
     service_url = obj['config']['service_url']
-    role_list = get_profiles(obj['user'], service_url)
-    role_list.sort(key=lambda r: r['name'])
+    role_list = get_profiles(service_url)
+
     with OutputFormat(output):
         print_table(sorted(role_list[0].keys()), role_list)
 
@@ -194,17 +196,23 @@ def get_aws_credentials(user, account, role, service_url):
 
     return r.json()
 
-def get_profiles(user, service_url):
-    '''Returns the AWS profiles for the specified user'''
+def get_profiles(service_url):
+    '''Returns the AWS profiles for a user.
 
-    roles_url = service_url + ROLES_RESOURCE.format(user)
+    User is implicit form ztoken'''
 
-    token = get_zign_token(user)
+    token = get_ztoken()
+    decoded_token = jwt.decode(token.get('access_token'), verify=False)
+
+    if MANAGED_ID_KEY not in decoded_token:
+        raise click.ClickException('Invalid token. Please check your ztoken configuration')
+
+    roles_url = service_url + ROLES_RESOURCE.format(user_id=decoded_token[MANAGED_ID_KEY])
+
     r = requests.get(roles_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))})
     r.raise_for_status()
-    roles = r.json()['account_roles']
 
-    return [ { 'name': item['account_name'], 'role': item['role_name'], 'id': item['account_id'] } for item in roles ]
+    return r.json()['account_roles']
 
 
 @cli.command()
