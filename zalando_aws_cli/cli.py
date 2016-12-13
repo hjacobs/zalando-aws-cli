@@ -167,17 +167,11 @@ def write_service_url(data, path):
             yaml.safe_dump(data, fd)
 
 
-def get_zign_token(user, jwt=False):
-    if jwt:
-        try:
-            return zign.api.get_token_browser_redirect('maijwt')
-        except zign.api.AuthenticationFailed as e:
-            raise click.ClickException('Unable to get token from zign')
-    else:
-        try:
-            return zign.api.get_named_token(['uid'], 'employees', 'mai', user, None, prompt=True)
-        except zign.api.ServerError as e:
-            raise click.ClickException('Unable to get token from zign')
+def get_ztoken():
+    try:
+        return zign.api.get_token_implicit_flow('zaws')
+    except zign.api.AuthenticationFailed as e:
+        raise click.ClickException(e)
 
 
 def get_aws_credentials(user, account, role, service_url):
