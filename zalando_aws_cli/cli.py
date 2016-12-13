@@ -70,111 +70,6 @@ def cli(ctx, config_file, awsprofile):
         ctx.invoke(login, account=account, role=role)
 
 
-def write_service_url(data, path):
-    '''Prompts for the Credential Service URL and writes in local configuration'''
-
-    # Keep trying until successful connection
-    while True:
-        service_url = click.prompt('Enter credentials service URL')
-        if not service_url.startswith('http'):
-            service_url = 'https://{}'.format(service_url)
-        try:
-            r = requests.get(service_url + '/swagger.json')
-            if r.status_code == 200:
-               break
-            else:
-               click.secho('ERROR: no response from credentials service', fg='red', bold=True)
-        except RequestException as e:
-            click.secho('ERROR: connection error or timed out', fg='red', bold=True)
-
-    data['service_url'] = service_url
-
-    with Action('Storing new credentials service URL in {}..'.format(path)):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'w') as fd:
-            yaml.safe_dump(data, fd)
-
-
-@cli.command('list')
-@output_option
-@click.pass_obj
-def list_profiles(obj, output):
-    '''List profiles'''
-
-    service_url = obj['config']['service_url']
-    role_list = get_profiles(obj['user'], service_url)
-    role_list.sort(key=lambda r: r['name'])
-    with OutputFormat(output):
-        print_table(sorted(role_list[0].keys()), role_list)
-
-
-def get_zign_token(user, jwt=False):
-    if jwt:
-        try:
-            return zign.api.get_token_browser_redirect('maijwt')
-        except zign.api.AuthenticationFailed as e:
-            raise click.ClickException('Unable to get token from zign')
-    else:
-        try:
-            return zign.api.get_named_token(['uid'], 'employees', 'mai', user, None, prompt=True)
-        except zign.api.ServerError as e:
-            raise click.ClickException('Unable to get token from zign')
-
-
-@cli.command('set-default')
-@click.argument('account')
-@click.argument('role')
-@click.pass_obj
-def set_default(obj, account, role):
-    '''Set default AWS account and role'''
-
-    role_list = get_profiles(obj['user'])
-
-    if (account, role) not in [ (item['name'], item['role']) for item in role_list ]:
-         raise click.UsageError('Profile "{} {}" does not exist'.format(account, role))
-
-    obj['config']['default_account'] = account
-    obj['config']['default_role'] = role
-
-    with Action('Storing configuration in {}..'.format(obj['config-file'])):
-        os.makedirs(obj['config-dir'], exist_ok=True)
-        with open(obj['config-file'], 'w') as fd:
-            yaml.safe_dump(obj['config'], fd)
-
-
-def get_aws_credentials(user, account, role, service_url):
-    '''Requests AWS Temporary Credentials from the provided Credential Service URL'''
-
-    profiles = get_profiles(user, service_url)
-
-    id = None
-    for item in profiles:
-        if item['name'] == account and item['role'] == role:
-            id = item['id']
-
-    if not id:
-        raise click.UsageError('Profile "{} {}" does not exist'.format(account, role))
-
-    credentials_url = service_url + CREDENTIALS_RESOURCE.format(id, role)
-
-    token = get_zign_token(user, jwt=True)
-    r = requests.get(credentials_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))})
-
-    return r.json()
-
-def get_profiles(user, service_url):
-    '''Returns the AWS profiles for the specified user'''
-
-    roles_url = service_url + ROLES_RESOURCE.format(user)
-
-    token = get_zign_token(user)
-    r = requests.get(roles_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))})
-    r.raise_for_status()
-    roles = r.json()['account_roles']
-
-    return [ { 'name': item['account_name'], 'role': item['role_name'], 'id': item['account_id'] } for item in roles ]
-
-
 @cli.command()
 @click.argument('account')
 @click.argument('role')
@@ -211,6 +106,111 @@ def login(obj, account, role, refresh, awsprofile):
                     act.progress()
         else:
             repeat = False
+
+
+@cli.command('list')
+@output_option
+@click.pass_obj
+def list_profiles(obj, output):
+    '''List profiles'''
+
+    service_url = obj['config']['service_url']
+    role_list = get_profiles(obj['user'], service_url)
+    role_list.sort(key=lambda r: r['name'])
+    with OutputFormat(output):
+        print_table(sorted(role_list[0].keys()), role_list)
+
+
+@cli.command('set-default')
+@click.argument('account')
+@click.argument('role')
+@click.pass_obj
+def set_default(obj, account, role):
+    '''Set default AWS account and role'''
+
+    role_list = get_profiles(obj['user'])
+
+    if (account, role) not in [ (item['name'], item['role']) for item in role_list ]:
+         raise click.UsageError('Profile "{} {}" does not exist'.format(account, role))
+
+    obj['config']['default_account'] = account
+    obj['config']['default_role'] = role
+
+    with Action('Storing configuration in {}..'.format(obj['config-file'])):
+        os.makedirs(obj['config-dir'], exist_ok=True)
+        with open(obj['config-file'], 'w') as fd:
+            yaml.safe_dump(obj['config'], fd)
+
+
+def write_service_url(data, path):
+    '''Prompts for the Credential Service URL and writes in local configuration'''
+
+    # Keep trying until successful connection
+    while True:
+        service_url = click.prompt('Enter credentials service URL')
+        if not service_url.startswith('http'):
+            service_url = 'https://{}'.format(service_url)
+        try:
+            r = requests.get(service_url + '/swagger.json')
+            if r.status_code == 200:
+               break
+            else:
+               click.secho('ERROR: no response from credentials service', fg='red', bold=True)
+        except RequestException as e:
+            click.secho('ERROR: connection error or timed out', fg='red', bold=True)
+
+    data['service_url'] = service_url
+
+    with Action('Storing new credentials service URL in {}..'.format(path)):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as fd:
+            yaml.safe_dump(data, fd)
+
+
+def get_zign_token(user, jwt=False):
+    if jwt:
+        try:
+            return zign.api.get_token_browser_redirect('maijwt')
+        except zign.api.AuthenticationFailed as e:
+            raise click.ClickException('Unable to get token from zign')
+    else:
+        try:
+            return zign.api.get_named_token(['uid'], 'employees', 'mai', user, None, prompt=True)
+        except zign.api.ServerError as e:
+            raise click.ClickException('Unable to get token from zign')
+
+
+def get_aws_credentials(user, account, role, service_url):
+    '''Requests AWS Temporary Credentials from the provided Credential Service URL'''
+
+    profiles = get_profiles(user, service_url)
+
+    id = None
+    for item in profiles:
+        if item['name'] == account and item['role'] == role:
+            id = item['id']
+
+    if not id:
+        raise click.UsageError('Profile "{} {}" does not exist'.format(account, role))
+
+    credentials_url = service_url + CREDENTIALS_RESOURCE.format(id, role)
+
+    token = get_zign_token(user, jwt=True)
+    r = requests.get(credentials_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))})
+
+    return r.json()
+
+def get_profiles(user, service_url):
+    '''Returns the AWS profiles for the specified user'''
+
+    roles_url = service_url + ROLES_RESOURCE.format(user)
+
+    token = get_zign_token(user)
+    r = requests.get(roles_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))})
+    r.raise_for_status()
+    roles = r.json()['account_roles']
+
+    return [ { 'name': item['account_name'], 'role': item['role_name'], 'id': item['account_id'] } for item in roles ]
 
 
 @cli.command()
