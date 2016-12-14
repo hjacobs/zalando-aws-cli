@@ -12,7 +12,6 @@ import zalando_aws_cli
 
 from clickclick import Action, AliasedGroup, print_table, OutputFormat
 from requests.exceptions import RequestException
-from zign.api import AuthenticationFailed
 
 CONFIG_LOCATION = 'zalando-aws-cli'
 
@@ -115,9 +114,9 @@ def require(ctx, account_role_or_alias, awsprofile):
 
     account_name, role_name = None, None
     if len(account_role_or_alias) == 1:
-        if 'aliases' in obj and account_role_or_alias[0] in obj['aliases']:
-            account_name = obj['aliases'][account_role_or_alias[0]]['account_name']
-            role_name = obj['aliases'][account_role_or_alias[0]]['role_name']
+        if 'aliases' in ctx.obj and account_role_or_alias[0] in ctx.obj['aliases']:
+            account_name = ctx.obj['aliases'][account_role_or_alias[0]]['account_name']
+            role_name = ctx.obj['aliases'][account_role_or_alias[0]]['role_name']
         else:
             raise click.UsageError('Alias "{}" does not exist'.format(account_role_or_alias))
     elif len(account_role_or_alias) > 1:
@@ -128,8 +127,8 @@ def require(ctx, account_role_or_alias, awsprofile):
     time_remaining = last_update['timestamp'] + 3600 * 0.9 - time.time() if last_update else 0
 
     if (time_remaining < 0 or
-        (account_name and (account_name, role_name) != (last_update['account_name'], last_update['account_name']))):
-        context.invoke(login, account_role_or_alias=account_role_or_alias, refresh=False, awsprofile=awsprofile)
+            (account_name and (account_name, role_name) != (last_update['account_name'], last_update['account_name']))):
+        ctx.invoke(login, account_role_or_alias=account_role_or_alias, refresh=False, awsprofile=awsprofile)
 
 
 @cli.command()
@@ -148,8 +147,8 @@ def list(obj, output):
 
     for profile in profile_list:
         if (default and
-            (profile['account_name'], profile['role_name']) == (default['account_name'], default['role_name'])):
-            profile['default'] = '✓' 
+                (profile['account_name'], profile['role_name']) == (default['account_name'], default['role_name'])):
+            profile['default'] = '✓'
         else:
             profile['default'] = ''
 
@@ -180,13 +179,14 @@ def alias(obj, alias, account_name, role_name):
         obj['aliases'] = {}
 
     # Prevent multiple aliases for same account
-    obj['aliases'] = {k:v for k, v in obj['aliases'].items()
+    obj['aliases'] = {k: v for k, v in obj['aliases'].items()
                       if (v['account_name'], v['role_name']) != (account_name, role_name)}
 
     obj['aliases'][alias] = {'account_name': account_name, 'role_name': role_name}
     stups_cli.config.store_config(obj, CONFIG_LOCATION)
 
     click.echo('You can now get AWS credentials to {} {} with "zaws login {}".'.format(account_name, role_name, alias))
+
 
 @cli.command('set-default')
 @click.argument('account-name')
@@ -216,9 +216,9 @@ def configure_service_url():
         try:
             r = requests.get(service_url + '/swagger.json')
             if r.status_code == 200:
-               break
+                break
             else:
-               click.secho('ERROR: no response from credentials service', fg='red', bold=True)
+                click.secho('ERROR: no response from credentials service', fg='red', bold=True)
         except RequestException as e:
             click.secho('ERROR: connection error or timed out', fg='red', bold=True)
 
@@ -243,7 +243,7 @@ def get_aws_credentials(account_name, role_name, service_url):
         raise click.UsageError('Profile "{} {}" does not exist'.format(account_name, role_name))
 
     credentials_url = service_url + RESOURCES['credentials'].format(account_id=profile['account_id'],
-                                                                   role_name=role_name)
+                                                                    role_name=role_name)
 
     token = get_ztoken()
 
@@ -251,6 +251,7 @@ def get_aws_credentials(account_name, role_name, service_url):
     r.raise_for_status()
 
     return r.json()
+
 
 def get_profiles(service_url):
     '''Returns the AWS profiles for a user.
