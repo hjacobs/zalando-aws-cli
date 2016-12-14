@@ -1,5 +1,6 @@
 import click
 import configparser
+import jwt
 import os
 import requests
 import stups_cli.config
@@ -9,197 +10,90 @@ import zign.api
 
 import zalando_aws_cli
 
-from clickclick import Action, choice, error, AliasedGroup, info, print_table, OutputFormat
+from clickclick import Action, AliasedGroup, print_table, OutputFormat
 from requests.exceptions import RequestException
-from zign.api import AuthenticationFailed
+
+CONFIG_LOCATION = 'zalando-aws-cli'
 
 AWS_CREDENTIALS_PATH = '~/.aws/credentials'
-CONFIG_DIR_PATH = click.get_app_dir('zalando-aws-cli')
-CONFIG_FILE_PATH = os.path.join(CONFIG_DIR_PATH, 'zalando-aws-cli.yaml')
+RESOURCES = {'credentials': '/aws-accounts/{account_id}/roles/{role_name}/credentials',
+             'roles':       '/aws-account-roles/{user_id}'}
+MANAGED_ID_KEY = 'https://identity.zalando.com/managed-id'
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
-
-CREDENTIALS_RESOURCE = '/aws-accounts/{}/roles/{}/credentials'
-
-
-def print_version(ctx, param, value):
-    if not value or ctx.resilient_parsing:
-        return
-    click.echo('Zalando AWS CLI {}'.format(zalando_aws_cli.__version__))
-    ctx.exit()
-
 
 output_option = click.option('-o', '--output', type=click.Choice(['text', 'json', 'tsv']), default='text',
                              help='Use alternative output format')
 
 
+def print_version(ctx, param, value):
+    if not value or ctx.resilient_parsing:
+        return
+    click.echo('{command} {version}'.format(command=ctx.info_name, version=zalando_aws_cli.__version__))
+    ctx.exit()
+
+
 @click.group(cls=AliasedGroup, invoke_without_command=True, context_settings=CONTEXT_SETTINGS)
-@click.option('--config-file', '-c', help='Use alternative configuration file',
-              default=CONFIG_FILE_PATH, metavar='PATH')
 @click.option('-V', '--version', is_flag=True, callback=print_version, expose_value=False, is_eager=True,
               help='Print the current version number and exit.')
 @click.option('--awsprofile', help='Profilename in ~/.aws/credentials', default='default', show_default=True)
 @click.pass_context
-def cli(ctx, config_file, awsprofile):
-    path = os.path.abspath(os.path.expanduser(config_file))
-    data = {}
-    if os.path.exists(path):
-        with open(path, 'rb') as fd:
-            data = yaml.safe_load(fd)
+def cli(ctx, awsprofile):
+    ctx.obj = stups_cli.config.load_config(CONFIG_LOCATION)
 
-    zign_config = stups_cli.config.load_config('zign')
-
-    ctx.obj = {'config': data,
-               'config-file': path,
-               'config-dir': os.path.dirname(path),
-               'last-update-filename': os.path.join(os.path.dirname(path), 'last_update.yaml'),
-               'user': zign_config['user']}
-
-    if 'service_url' not in data:
-        write_service_url(data, path)
+    if 'service_url' not in ctx.obj:
+        configure_service_url()
 
     if not ctx.invoked_subcommand:
-        account, role = None, None
-        if 'default_account' in data:
-            account = data['default_account']
-            role = data['default_role']
-
-        if not account:
-            raise click.UsageError('No default profile configured. Use "zaws set-default..." to set a default profile.')
-        ctx.invoke(login, account=account, role=role)
-
-
-def write_service_url(data, path):
-    '''Prompts for the Credential Service URL and writes in local configuration'''
-
-    # Keep trying until successful connection
-    while True:
-        service_url = click.prompt('Enter credentials service URL')
-        if not service_url.startswith('http'):
-            service_url = 'https://{}'.format(service_url)
-        try:
-            r = requests.get(service_url + '/swagger.json')
-            if r.status_code == 200:
-               break
-            else:
-               click.secho('ERROR: no response from credentials service', fg='red', bold=True)
-        except RequestException as e:
-            click.secho('ERROR: connection error or timed out', fg='red', bold=True)
-
-    data['service_url'] = service_url
-
-    with Action('Storing new credentials service URL in {}..'.format(path)):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'w') as fd:
-            yaml.safe_dump(data, fd)
-
-
-@cli.command('list')
-@output_option
-@click.pass_obj
-def list_profiles(obj, output):
-    '''List profiles'''
-
-    role_list = get_profiles(obj['user'])
-    role_list.sort(key=lambda r: r['name'])
-    with OutputFormat(output):
-        print_table(sorted(role_list[0].keys()), role_list)
-
-
-def get_profiles(user):
-    '''Returns the AWS profiles for the specified user'''
-
-    # TODO MUST be changed to the Credential Service URL
-    service_url = 'https://teams.auth.zalando.com/api/accounts/aws?member={}&role=any'.format(user)
-
-    token = get_zign_token(user)
-    r = requests.get(service_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))})
-
-    return [ { 'name': item['name'], 'role': item['role'], 'id': item['id'] } for item in r.json() ]
-
-
-def get_zign_token(user, jwt=False):
-    if jwt:
-        try:
-            return zign.api.get_token_browser_redirect('maijwt')
-        except zign.api.AuthenticationFailed as e:
-            raise click.ClickException('Unable to get token from zign')
-    else:
-        try:
-            return zign.api.get_named_token(['uid'], 'employees', 'mai', user, None, prompt=True)
-        except zign.api.ServerError as e:
-            raise click.ClickException('Unable to get token from zign')
-
-
-@cli.command('set-default')
-@click.argument('account')
-@click.argument('role')
-@click.pass_obj
-def set_default(obj, account, role):
-    '''Set default AWS account and role'''
-
-    role_list = get_profiles(obj['user'])
-
-    if (account, role) not in [ (item['name'], item['role']) for item in role_list ]:
-        raise click.UsageError('Profile "{} {}" does not exist'.format(account, role))
-
-    obj['config']['default_account'] = account
-    obj['config']['default_role'] = role
-
-    with Action('Storing configuration in {}..'.format(obj['config-file'])):
-        os.makedirs(obj['config-dir'], exist_ok=True)
-        with open(obj['config-file'], 'w') as fd:
-            yaml.safe_dump(obj['config'], fd)
-
-
-def get_aws_credentials(user, account, role, service_url):
-    '''Requests AWS Temporary Credentials from the provided Credential Service URL'''
-
-    profiles = get_profiles(user)
-
-    id = None
-    for item in profiles:
-        if item['name'] == account and item['role'] == role:
-            id = item['id']
-
-    if not id:
-        raise click.UsageError('Profile "{} {}" does not exist'.format(account, role))
-
-    credentials_url = service_url + CREDENTIALS_RESOURCE.format(id, role)
-
-    token = get_zign_token(user, jwt=True)
-    r = requests.get(credentials_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))})
-
-    return r.json()
+        ctx.invoke(login)
 
 
 @cli.command()
-@click.argument('account')
-@click.argument('role')
+@click.argument('account-role-or-alias', nargs=-1)
 @click.option('-r', '--refresh', is_flag=True, help='Keep running and refresh access tokens automatically')
 @click.option('--awsprofile', help='Profilename in ~/.aws/credentials', default='default', show_default=True)
 @click.pass_obj
-def login(obj, account, role, refresh, awsprofile):
-    '''Login to AWS with given account and role'''
+def login(obj, account_role_or_alias, refresh, awsprofile):
+    '''Login to AWS with given account and role. An alias can also be used.'''
+
+    account_name, role_name = None, None
+    if len(account_role_or_alias) == 0:
+        if 'default' in obj:
+            account_name = obj['default']['account_name']
+            role_name = obj['default']['role_name']
+        else:
+            raise click.UsageError('No default profile. Use "zaws set-default..." to set a default profile.')
+    elif len(account_role_or_alias) == 1:
+        if 'aliases' in obj and account_role_or_alias[0] in obj['aliases']:
+            account_name = obj['aliases'][account_role_or_alias[0]]['account_name']
+            role_name = obj['aliases'][account_role_or_alias[0]]['role_name']
+        else:
+            raise click.UsageError('Alias "{}" does not exist'.format(account_role_or_alias))
+    else:
+        account_name = account_role_or_alias[0]
+        role_name = account_role_or_alias[1]
 
     repeat = True
     while repeat:
-        last_update = get_last_update(obj)
-        if 'account' in last_update and last_update['account'] and (not account or not role):
-            account, role = last_update['account'], last_update['role']
+        if 'last_update' in obj and (not account_name or not role_name):
+            account_name = obj['last_update']['account_name']
+            role_name = obj['last_update']['role_name']
 
-        creds = get_aws_credentials(obj['user'], account, role, obj['config']['service_url'])
-        with Action('Writing temporary AWS credentials for {} {}..'.format(account, role)):
-            write_aws_credentials(awsprofile, creds['access_key_id'], creds['secret_access_key'], creds['session_token'])
-            with open(obj['last-update-filename'], 'w') as fd:
-                yaml.safe_dump({'timestamp': time.time(), 'account': account, 'role': role}, fd)
+        credentials = get_aws_credentials(account_name, role_name, obj['service_url'])
+        with Action('Writing temporary AWS credentials for {} {}..'.format(account_name, role_name)):
+            write_aws_credentials(awsprofile, credentials['access_key_id'], credentials['secret_access_key'],
+                                  credentials['session_token'])
+
+            obj['last_update'] = {'account_name':   account_name,
+                                  'role_name':      role_name,
+                                  'timestamp':      time.time()}
+            stups_cli.config.store_config(obj, CONFIG_LOCATION)
 
         if refresh:
-            last_update = get_last_update(obj)
             wait_time = 3600 * 0.9
             with Action('Waiting {} minutes before refreshing credentials..'
-                        .format(round(((last_update['timestamp']+wait_time)-time.time()) / 60))) as act:
-                while time.time() < last_update['timestamp'] + wait_time:
+                        .format(round(((obj['last_update']['timestamp']+wait_time)-time.time()) / 60))) as act:
+                while time.time() < obj['last_update']['timestamp'] + wait_time:
                     try:
                         time.sleep(120)
                     except KeyboardInterrupt:
@@ -212,21 +106,188 @@ def login(obj, account, role, refresh, awsprofile):
 
 
 @cli.command()
-@click.argument('profile', nargs=-1)
+@click.argument('account-role-or-alias', nargs=-1)
 @click.option('--awsprofile', help='Profilename in ~/.aws/credentials', default='default', show_default=True)
 @click.pass_context
-def require(context, profile, awsprofile):
+def require(ctx, account_role_or_alias, awsprofile):
     '''Login if necessary'''
 
-    last_update = get_last_update(context.obj)
-    time_remaining = last_update['timestamp'] + 3600 * 0.9 - time.time()
-    if time_remaining < 0 or (profile and profile[0] != last_update['profile']):
-        context.invoke(login, profile=profile, refresh=False, awsprofile=awsprofile)
+    account_name, role_name = None, None
+    if len(account_role_or_alias) == 1:
+        if 'aliases' in ctx.obj and account_role_or_alias[0] in ctx.obj['aliases']:
+            account_name = ctx.obj['aliases'][account_role_or_alias[0]]['account_name']
+            role_name = ctx.obj['aliases'][account_role_or_alias[0]]['role_name']
+        else:
+            raise click.UsageError('Alias "{}" does not exist'.format(account_role_or_alias))
+    elif len(account_role_or_alias) > 1:
+        account_name = account_role_or_alias[0]
+        role_name = account_role_or_alias[1]
+
+    last_update = ctx.obj['last_update'] if 'last_update' in ctx.obj else None
+    time_remaining = last_update['timestamp'] + 3600 * 0.9 - time.time() if last_update else 0
+
+    if (time_remaining < 0 or
+            (account_name and (account_name, role_name) != (last_update['account_name'], last_update['account_name']))):
+        ctx.invoke(login, account_role_or_alias=account_role_or_alias, refresh=False, awsprofile=awsprofile)
 
 
-def get_last_update(obj):
+@cli.command()
+@output_option
+@click.pass_obj
+def list(obj, output):
+    '''List AWS profiles'''
+
+    profile_list = get_profiles(obj['service_url'])
+    default = obj['default'] if 'default' in obj else {}
+
+    if 'aliases' in obj:
+        alias_list = {(v['account_name'], v['role_name']): alias for alias, v in obj['aliases'].items()}
+    else:
+        alias_list = {}
+
+    for profile in profile_list:
+        if (default and
+                (profile['account_name'], profile['role_name']) == (default['account_name'], default['role_name'])):
+            profile['default'] = '✓'
+        else:
+            profile['default'] = ''
+
+        if (profile['account_name'], profile['role_name']) in alias_list:
+            profile['alias'] = alias_list[(profile['account_name'], profile['role_name'])]
+        else:
+            profile['alias'] = ''
+
+    profile_list.sort(key=lambda r: r['account_name'])
+
+    with OutputFormat(output):
+        print_table(['account_id', 'account_name', 'role_name', 'alias', 'default'], profile_list)
+
+
+@cli.command()
+@click.argument('alias')
+@click.argument('account-name')
+@click.argument('role-name')
+@click.pass_obj
+def alias(obj, alias, account_name, role_name):
+    '''Set an alias to an account and role name.'''
+
+    profile = get_profile(account_name, role_name, obj['service_url'])
+    if not profile:
+        raise click.UsageError('Profile "{} {}" does not exist'.format(account_name, role_name))
+
+    if 'aliases' not in obj:
+        obj['aliases'] = {}
+
+    # Prevent multiple aliases for same account
+    obj['aliases'] = {k: v for k, v in obj['aliases'].items()
+                      if (v['account_name'], v['role_name']) != (account_name, role_name)}
+
+    obj['aliases'][alias] = {'account_name': account_name, 'role_name': role_name}
+    stups_cli.config.store_config(obj, CONFIG_LOCATION)
+
+    click.echo('You can now get AWS credentials to {} {} with "zaws login {}".'.format(account_name, role_name, alias))
+
+
+@cli.command('set-default')
+@click.argument('account-name')
+@click.argument('role-name')
+@click.pass_obj
+def set_default(obj, account_name, role_name):
+    '''Set default AWS account role'''
+
+    profile = get_profile(account_name, role_name, obj['service_url'])
+    if not profile:
+        raise click.UsageError('Profile "{} {}" does not exist'.format(account_name, role_name))
+
+    obj['default'] = {'account_name': profile['account_name'], 'role_name': profile['role_name']}
+    stups_cli.config.store_config(obj, CONFIG_LOCATION)
+
+    click.echo('Default account role set to {} {}".'.format(account_name, role_name))
+
+
+def configure_service_url():
+    '''Prompts for the Credential Service URL and writes in local configuration'''
+
+    # Keep trying until successful connection
+    while True:
+        service_url = click.prompt('Enter credentials service URL')
+        if not service_url.startswith('http'):
+            service_url = 'https://{}'.format(service_url)
+        try:
+            r = requests.get(service_url + '/swagger.json', timeout=2)
+            if r.status_code == 200:
+                break
+            else:
+                click.secho('ERROR: no response from credentials service', fg='red', bold=True)
+        except RequestException as e:
+            click.secho('ERROR: connection error or timed out', fg='red', bold=True)
+
+    config = stups_cli.config.load_config('zalando-aws-cli')
+    config['service_url'] = service_url
+    stups_cli.config.store_config(config, 'zalando-aws-cli')
+
+
+def get_ztoken():
     try:
-        with open(obj['last-update-filename'], 'rb') as fd:
+        return zign.api.get_token_implicit_flow('zaws')
+    except zign.api.AuthenticationFailed as e:
+        raise click.ClickException(e)
+
+
+def get_aws_credentials(account_name, role_name, service_url):
+    '''Requests the specified AWS Temporary Credentials from the provided Credential Service URL'''
+
+    profile = get_profile(account_name, role_name, service_url)
+
+    if not profile:
+        raise click.UsageError('Profile "{} {}" does not exist'.format(account_name, role_name))
+
+    credentials_url = service_url + RESOURCES['credentials'].format(account_id=profile['account_id'],
+                                                                    role_name=role_name)
+
+    token = get_ztoken()
+
+    r = requests.get(credentials_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))},
+                     timeout=30)
+    r.raise_for_status()
+
+    return r.json()
+
+
+def get_profiles(service_url):
+    '''Returns the AWS profiles for a user.
+
+    User is implicit from ztoken'''
+
+    token = get_ztoken()
+    decoded_token = jwt.decode(token.get('access_token'), verify=False)
+
+    if MANAGED_ID_KEY not in decoded_token:
+        raise click.ClickException('Invalid token. Please check your ztoken configuration')
+
+    roles_url = service_url + RESOURCES['roles'].format(user_id=decoded_token[MANAGED_ID_KEY])
+
+    r = requests.get(roles_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))}, timeout=20)
+    r.raise_for_status()
+
+    return r.json()['account_roles']
+
+
+def get_profile(account_name, role_name, service_url):
+    '''Returns the profile information for the given role and account name.'''
+
+    profiles = get_profiles(service_url)
+
+    for item in profiles:
+        if item['account_name'] == account_name and item['role_name'] == role_name:
+            return item
+
+    return None
+
+
+def get_last_update(filename):
+    try:
+        with open(filename, 'rb') as fd:
             last_update = yaml.safe_load(fd)
     except:
         last_update = {'timestamp': 0}
