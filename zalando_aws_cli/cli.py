@@ -48,6 +48,25 @@ def cli(ctx, awsprofile):
         ctx.invoke(login)
 
 
+def get_account_name_role_name(config, account_role_or_alias):
+    if len(account_role_or_alias) == 0:
+        if 'default' in config:
+            account_name = config['default']['account_name']
+            role_name = config['default']['role_name']
+        else:
+            raise click.UsageError('No default profile. Use "zaws set-default..." to set a default profile.')
+    elif len(account_role_or_alias) == 1:
+        if 'aliases' in config and account_role_or_alias[0] in config['aliases']:
+            account_name = config['aliases'][account_role_or_alias[0]]['account_name']
+            role_name = config['aliases'][account_role_or_alias[0]]['role_name']
+        else:
+            raise click.UsageError('Alias "{}" does not exist'.format(account_role_or_alias))
+    else:
+        account_name = account_role_or_alias[0]
+        role_name = account_role_or_alias[1]
+    return account_name, role_name
+
+
 @cli.command()
 @click.argument('account-role-or-alias', nargs=-1)
 @click.option('-r', '--refresh', is_flag=True, help='Keep running and refresh access tokens automatically')
@@ -56,22 +75,7 @@ def cli(ctx, awsprofile):
 def login(obj, account_role_or_alias, refresh, awsprofile):
     '''Login to AWS with given account and role. An alias can also be used.'''
 
-    account_name, role_name = None, None
-    if len(account_role_or_alias) == 0:
-        if 'default' in obj:
-            account_name = obj['default']['account_name']
-            role_name = obj['default']['role_name']
-        else:
-            raise click.UsageError('No default profile. Use "zaws set-default..." to set a default profile.')
-    elif len(account_role_or_alias) == 1:
-        if 'aliases' in obj and account_role_or_alias[0] in obj['aliases']:
-            account_name = obj['aliases'][account_role_or_alias[0]]['account_name']
-            role_name = obj['aliases'][account_role_or_alias[0]]['role_name']
-        else:
-            raise click.UsageError('Alias "{}" does not exist'.format(account_role_or_alias))
-    else:
-        account_name = account_role_or_alias[0]
-        role_name = account_role_or_alias[1]
+    account_name, role_name = get_account_name_role_name(obj, account_role_or_alias)
 
     repeat = True
     while repeat:
@@ -112,16 +116,7 @@ def login(obj, account_role_or_alias, refresh, awsprofile):
 def require(ctx, account_role_or_alias, awsprofile):
     '''Login if necessary'''
 
-    account_name, role_name = None, None
-    if len(account_role_or_alias) == 1:
-        if 'aliases' in ctx.obj and account_role_or_alias[0] in ctx.obj['aliases']:
-            account_name = ctx.obj['aliases'][account_role_or_alias[0]]['account_name']
-            role_name = ctx.obj['aliases'][account_role_or_alias[0]]['role_name']
-        else:
-            raise click.UsageError('Alias "{}" does not exist'.format(account_role_or_alias))
-    elif len(account_role_or_alias) > 1:
-        account_name = account_role_or_alias[0]
-        role_name = account_role_or_alias[1]
+    account_name, role_name = get_account_name_role_name(ctx.obj, account_role_or_alias)
 
     last_update = ctx.obj['last_update'] if 'last_update' in ctx.obj else None
     time_remaining = last_update['timestamp'] + 3600 * 0.9 - time.time() if last_update else 0
