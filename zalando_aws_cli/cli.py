@@ -48,6 +48,15 @@ def cli(ctx, awsprofile):
         ctx.invoke(login)
 
 
+def get_matching_profiles(profiles: list, search_string: str) -> list:
+    matches = []
+    for profile in profiles:
+        if profile['account_name'] == search_string\
+                or profile['role_name'] == search_string or profile['account_id'] == search_string:
+                matches.append(profile)
+    return matches
+
+
 def get_account_name_role_name(config, account_role_or_alias):
     if len(account_role_or_alias) == 0:
         if 'default' in config:
@@ -60,7 +69,13 @@ def get_account_name_role_name(config, account_role_or_alias):
             account_name = config['aliases'][account_role_or_alias[0]]['account_name']
             role_name = config['aliases'][account_role_or_alias[0]]['role_name']
         else:
-            raise click.UsageError('Alias "{}" does not exist'.format(account_role_or_alias))
+            profiles = get_profiles(config['service_url'])
+            matching_profiles = get_matching_profiles(profiles, account_role_or_alias[0])
+            if len(matching_profiles) == 1:
+                account_name = matching_profiles[0]['account_name']
+                role_name = matching_profiles[0]['role_name']
+            else:
+                raise click.UsageError('Alias "{}" does not exist'.format(account_role_or_alias))
     else:
         account_name = account_role_or_alias[0]
         role_name = account_role_or_alias[1]
