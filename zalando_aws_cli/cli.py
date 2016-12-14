@@ -88,7 +88,9 @@ def get_account_name_role_name(config, account_role_or_alias):
 @click.option('--awsprofile', help='Profilename in ~/.aws/credentials', default='default', show_default=True)
 @click.pass_obj
 def login(obj, account_role_or_alias, refresh, awsprofile):
-    '''Login to AWS with given account and role. An alias can also be used.'''
+    '''Login to AWS with given account and role. An alias can also be used.
+
+    If the user has only one role, only the AWS account is needed.'''
 
     account_name, role_name = get_account_name_role_name(obj, account_role_or_alias)
 
