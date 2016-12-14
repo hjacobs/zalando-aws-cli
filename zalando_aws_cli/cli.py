@@ -46,14 +46,7 @@ def cli(ctx, awsprofile):
         configure_service_url()
 
     if not ctx.invoked_subcommand:
-        account_name, role_name = None, None
-        if 'default_profile' in ctx.obj:
-            account_name = ctx.obj['default_profile']['account_name']
-            role_name = ctx.obj['default_profile']['role_name']
-
-        if not account_name:
-            raise click.UsageError('No default profile configured. Use "zaws set-default..." to set a default profile.')
-        ctx.invoke(login, account_name=account_name, role_name=role_name)
+        ctx.invoke(login)
 
 
 @cli.command()
@@ -66,11 +59,15 @@ def login(obj, account_role_or_alias, refresh, awsprofile):
 
     account_name, role_name = None, None
     if len(account_role_or_alias) == 0:
-        pass
+        if 'default' in obj:
+            account_name = obj['default']['account_name']
+            role_name = obj['default']['role_name']
+        else:
+            raise click.UsageError('No default profile. Use "zaws set-default..." to set a default profile.')
     elif len(account_role_or_alias) == 1:
         if 'aliases' in obj and account_role_or_alias[0] in obj['aliases']:
-            account_name = obj['aliases'][account_role_or_alias[0]][0]
-            role_name = obj['aliases'][account_role_or_alias[0]][1]
+            account_name = obj['aliases'][account_role_or_alias[0]]['account_name']
+            role_name = obj['aliases'][account_role_or_alias[0]]['role_name']
         else:
             raise click.UsageError('Alias "{}" does not exist'.format(account_role_or_alias))
     else:
@@ -110,15 +107,61 @@ def login(obj, account_role_or_alias, refresh, awsprofile):
 
 
 @cli.command()
+@click.argument('account-role-or-alias', nargs=-1)
+@click.option('--awsprofile', help='Profilename in ~/.aws/credentials', default='default', show_default=True)
+@click.pass_context
+def require(ctx, account_role_or_alias, awsprofile):
+    '''Login if necessary'''
+
+    account_name, role_name = None, None
+    if len(account_role_or_alias) == 1:
+        if 'aliases' in obj and account_role_or_alias[0] in obj['aliases']:
+            account_name = obj['aliases'][account_role_or_alias[0]]['account_name']
+            role_name = obj['aliases'][account_role_or_alias[0]]['role_name']
+        else:
+            raise click.UsageError('Alias "{}" does not exist'.format(account_role_or_alias))
+    elif len(account_role_or_alias) > 1:
+        account_name = account_role_or_alias[0]
+        role_name = account_role_or_alias[1]
+
+    last_update = ctx.obj['last_update'] if 'last_update' in ctx.obj else None
+    time_remaining = last_update['timestamp'] + 3600 * 0.9 - time.time() if last_update else 0
+
+    if (time_remaining < 0 or
+        (account_name and (account_name, role_name) != (last_update['account_name'], last_update['account_name']))):
+        context.invoke(login, account_role_or_alias=account_role_or_alias, refresh=False, awsprofile=awsprofile)
+
+
+@cli.command()
 @output_option
 @click.pass_obj
 def list(obj, output):
     '''List AWS profiles'''
 
-    role_list = get_profiles(obj['service_url'])
+    profile_list = get_profiles(obj['service_url'])
+    default = obj['default'] if 'default' in obj else {}
+
+    if 'aliases' in obj:
+        alias_list = {(v['account_name'], v['role_name']): alias for alias, v in obj['aliases'].items()}
+    else:
+        alias_list = {}
+
+    for profile in profile_list:
+        if (default and
+            (profile['account_name'], profile['role_name']) == (default['account_name'], default['role_name'])):
+            profile['default'] = '✓' 
+        else:
+            profile['default'] = ''
+
+        if (profile['account_name'], profile['role_name']) in alias_list:
+            profile['alias'] = alias_list[(profile['account_name'], profile['role_name'])]
+        else:
+            profile['alias'] = ''
+
+    profile_list.sort(key=lambda r: r['account_name'])
 
     with OutputFormat(output):
-        print_table(sorted(role_list[0].keys()), role_list)
+        print_table(['account_id', 'account_name', 'role_name', 'alias', 'default'], profile_list)
 
 
 @cli.command()
@@ -130,35 +173,36 @@ def alias(obj, alias, account_name, role_name):
     '''Set an alias to an account and role name.'''
 
     profile = get_profile(account_name, role_name, obj['service_url'])
-
     if not profile:
         raise click.UsageError('Profile "{} {}" does not exist'.format(account_name, role_name))
 
     if 'aliases' not in obj:
         obj['aliases'] = {}
 
-    obj['aliases'][alias] = (account_name, role_name)
+    # Prevent multiple aliases for same account
+    obj['aliases'] = {k:v for k, v in obj['aliases'].items()
+                      if (v['account_name'], v['role_name']) != (account_name, role_name)}
+
+    obj['aliases'][alias] = {'account_name': account_name, 'role_name': role_name}
     stups_cli.config.store_config(obj, CONFIG_LOCATION)
 
+    click.echo('You can now get AWS credentials to {} {} with "zaws login {}".'.format(account_name, role_name, alias))
+
 @cli.command('set-default')
-@click.argument('account')
-@click.argument('role')
+@click.argument('account-name')
+@click.argument('role-name')
 @click.pass_obj
-def set_default(obj, account, role):
-    '''Set default AWS account and role'''
+def set_default(obj, account_name, role_name):
+    '''Set default AWS account role'''
 
-    role_list = get_profiles(obj['user'])
+    profile = get_profile(account_name, role_name, obj['service_url'])
+    if not profile:
+        raise click.UsageError('Profile "{} {}" does not exist'.format(account_name, role_name))
 
-    if (account, role) not in [ (item['name'], item['role']) for item in role_list ]:
-        raise click.UsageError('Profile "{} {}" does not exist'.format(account, role))
+    obj['default'] = {'account_name': profile['account_name'], 'role_name': profile['role_name']}
+    stups_cli.config.store_config(obj, CONFIG_LOCATION)
 
-    obj['config']['default_account'] = account
-    obj['config']['default_role'] = role
-
-    with Action('Storing configuration in {}..'.format(obj['config-file'])):
-        os.makedirs(obj['config-dir'], exist_ok=True)
-        with open(obj['config-file'], 'w') as fd:
-            yaml.safe_dump(obj['config'], fd)
+    click.echo('Default account role set to {} {}".'.format(account_name, role_name))
 
 
 def configure_service_url():
@@ -246,19 +290,6 @@ def get_last_update(filename):
     except:
         last_update = {'timestamp': 0}
     return last_update
-
-
-@cli.command()
-@click.argument('profile', nargs=-1)
-@click.option('--awsprofile', help='Profilename in ~/.aws/credentials', default='default', show_default=True)
-@click.pass_context
-def require(context, profile, awsprofile):
-    '''Login if necessary'''
-
-    last_update = get_last_update(context.obj)
-    time_remaining = last_update['timestamp'] + 3600 * 0.9 - time.time()
-    if time_remaining < 0 or (profile and profile[0] != last_update['profile']):
-        context.invoke(login, profile=profile, refresh=False, awsprofile=awsprofile)
 
 
 def write_aws_credentials(profile, key_id, secret, session_token=None):
