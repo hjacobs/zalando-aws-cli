@@ -2,7 +2,17 @@
 Zalando AWS CLI
 ===============
 
-Command line utility to exchange OAuth tokens for temporary AWS credentials.
+This package provides the ``zaws`` command line utility to exchange OAuth tokens for temporary AWS credentials by calling the `AWS Credentials Service`_.
+
+Installation
+============
+
+The ``zalando-aws-cli`` package is part of the ``stups`` bundle:
+
+.. code-block:: bash
+
+    $ sudo pip3 install -U stups
+    $ stups configure
 
 Usage
 =====
@@ -52,3 +62,5 @@ Unit tests
 
     $ sudo pip3 install tox
     $ tox
+
+.. _AWS Credentials Service: https://github.com/zalando-incubator/aws-credentials-service
