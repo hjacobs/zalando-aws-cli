@@ -2,10 +2,38 @@
 Zalando AWS CLI
 ===============
 
+Command line utility to exchange OAuth tokens for temporary AWS credentials.
+
+Usage
+=====
+
 .. code-block:: bash
 
     $ zaws list                  # list all allowed account roles
     $ zaws login myacc RoleName  # write ~/.aws/credentials
+
+You can configure your default account/role to only run ``zaws``:
+
+.. code-block:: bash
+
+    $ zaws set-default myacc RoleName
+    $ zaws
+
+There are multiple ways of abbreviating the command line:
+
+.. code-block:: bash
+
+    $ zaws li            # command can be abbreviated
+    $ zaws login myacc   # only the account name is needed if you have only one role
+    $ zaws alias myalias myacc PowerUser # create an alias
+    $ zaws lo myalias    # use the alias
+
+Use ``-h`` to get a list of commands and help:
+
+.. code-block:: bash
+
+    $ zaws -h        # list top-level commands
+    $ zaws login -h  # help on the "login" command
 
 Running locally
 ===============
