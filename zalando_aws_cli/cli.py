@@ -75,7 +75,7 @@ def get_account_name_role_name(config, account_role_or_alias):
                 account_name = matching_profiles[0]['account_name']
                 role_name = matching_profiles[0]['role_name']
             else:
-                raise click.UsageError('Alias "{}" does not exist'.format(account_role_or_alias))
+                raise click.UsageError('Alias "{}" does not exist'.format(account_role_or_alias[0]))
     else:
         account_name = account_role_or_alias[0]
         role_name = account_role_or_alias[1]
