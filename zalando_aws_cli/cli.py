@@ -214,7 +214,7 @@ def set_default(obj, account_name, role_name):
     obj['default'] = {'account_name': profile['account_name'], 'role_name': profile['role_name']}
     stups_cli.config.store_config(obj, CONFIG_LOCATION)
 
-    click.echo('Default account role set to {} {}".'.format(account_name, role_name))
+    click.echo('Default account role set to {} {}'.format(account_name, role_name))
 
 
 def configure_service_url():
