@@ -25,6 +25,8 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 output_option = click.option('-o', '--output', type=click.Choice(['text', 'json', 'tsv']), default='text',
                              help='Use alternative output format')
 
+session = requests.Session()
+
 
 def print_version(ctx, param, value):
     if not value or ctx.resilient_parsing:
@@ -226,7 +228,7 @@ def configure_service_url():
         if not service_url.startswith('http'):
             service_url = 'https://{}'.format(service_url)
         try:
-            r = requests.get(service_url + '/swagger.json', timeout=2)
+            r = session.get(service_url + '/swagger.json', timeout=2)
             if r.status_code == 200:
                 break
             else:
@@ -259,8 +261,8 @@ def get_aws_credentials(account_name, role_name, service_url):
 
     token = get_ztoken()
 
-    r = requests.get(credentials_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))},
-                     timeout=30)
+    r = session.get(credentials_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))},
+                    timeout=30)
     r.raise_for_status()
 
     return r.json()
@@ -279,7 +281,7 @@ def get_profiles(service_url):
 
     roles_url = service_url + RESOURCES['roles'].format(user_id=decoded_token[MANAGED_ID_KEY])
 
-    r = requests.get(roles_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))}, timeout=20)
+    r = session.get(roles_url, headers={'Authorization': 'Bearer {}'.format(token.get('access_token'))}, timeout=20)
     r.raise_for_status()
 
     return r.json()['account_roles']
