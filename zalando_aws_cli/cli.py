@@ -141,7 +141,7 @@ def require(ctx, account_role_or_alias, awsprofile):
     time_remaining = last_update['timestamp'] + 3600 * 0.9 - time.time() if last_update else 0
 
     if (time_remaining < 0 or
-            (account_name and (account_name, role_name) != (last_update['account_name'], last_update['account_name']))):
+            (account_name and (account_name, role_name) != (last_update['account_name'], last_update['role_name']))):
         ctx.invoke(login, account_role_or_alias=account_role_or_alias, refresh=False, awsprofile=awsprofile)
 
 
