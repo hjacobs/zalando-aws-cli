@@ -45,6 +45,7 @@ def cli(ctx, awsprofile):
 
     if 'service_url' not in ctx.obj:
         configure_service_url()
+        ctx.obj = stups_cli.config.load_config(CONFIG_LOCATION)
 
     if not ctx.invoked_subcommand:
         ctx.invoke(login)
@@ -140,7 +141,7 @@ def require(ctx, account_role_or_alias, awsprofile):
     last_update = ctx.obj['last_update'] if 'last_update' in ctx.obj else None
     time_remaining = last_update['timestamp'] + 3600 * 0.9 - time.time() if last_update else 0
 
-    if (time_remaining < 0 or
+    if (time_remaining <= 0 or
             (account_name and (account_name, role_name) != (last_update['account_name'], last_update['role_name']))):
         ctx.invoke(login, account_role_or_alias=account_role_or_alias, refresh=False, awsprofile=awsprofile)
 
